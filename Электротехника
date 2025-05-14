@@ -1,0 +1,65 @@
+import numpy as np
+
+def create_T_matrix(Z1, Z2, Z3):
+    Z1 = complex(Z1)
+    Z2 = complex(Z2)
+    Z3 = complex(Z3)
+    A = (Z1 + Z2) / Z2
+    B = Z1 + Z3 + (Z1 * Z3) / Z2
+    C = 1 / Z2
+    D = (Z3 + Z2) / Z2
+    return np.array([[A, B], [C, D]], dtype=complex)
+
+def abcd_to_y(A):
+    Y11 = A[1,1] / A[0,1]
+    Y12 = (A[0,1] * A[1,0] - A[0,0] * A[1,1]) / A[0,1]
+    Y21 = -1 / A[0,1]
+    Y22 = A[0,0] / A[0,1]
+    return np.array([[Y11, Y12], [Y21, Y22]])
+
+def y_to_abcd(Y):
+    Y11, Y12 = Y[0,0], Y[0,1]
+    Y21, Y22 = Y[1,0], Y[1,1]
+    A = -Y22 / Y21
+    B = -1 / Y21
+    C = (Y12 * Y21 - Y11 * Y22) / Y21  # Исправленная формула
+    D = -Y11 / Y21
+    return np.array([[A, B], [C, D]])
+
+# Ввод данных
+Z_series = complex(input("Введите последовательное сопротивление (A1): "))
+Z1_T = complex(input("Введите Z1 для T-схемы (A2): "))
+Z2_T = complex(input("Введите Z2 для T-схемы (A2): "))
+Z3_T = complex(input("Введите Z3 для T-схемы (A2): "))
+
+# Создание матриц
+A1 = np.array([[1, Z_series], [0, 1]], dtype=complex)
+A2 = create_T_matrix(Z1_T, Z2_T, Z3_T)
+
+# Промежуточные выводы
+print("\nМатрица A1 (последовательное сопротивление):")
+print(A1)
+print("\nМатрица A2 (T-образная):")
+print(A2)
+
+# Преобразование в Y-матрицы
+Y1 = abcd_to_y(A1)
+Y2 = abcd_to_y(A2)
+print("\nY-матрица элемента A1:")
+print(Y1)
+print("\nY-матрица элемента A2:")
+print(Y2)
+
+# Суммирование Y-матриц
+Y_total = Y1 + Y2
+print("\nСуммарная Y-матрица:")
+print(Y_total)
+
+# Обратное преобразование в ABCD
+A_total = y_to_abcd(Y_total)
+det_A_total = np.linalg.det(A_total)
+
+# Итоговый вывод
+print("\nИтоговая ABCD-матрица:")
+print(A_total)
+print(f"\nОпределитель: {det_A_total:.2f}")
