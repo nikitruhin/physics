@@ -1,0 +1,60 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+
+# Параметры цепи
+R = 10.0    # Ом
+L = 0.1     # Гн
+C = 10e-6   # Ф
+E = 12.0    # В
+
+# Начальные условия
+uC0 = 0.0   # Начальное напряжение на конденсаторе
+iL0 = 0.0   # Начальный ток через индуктивность
+
+# Матрицы состояния
+A = np.array([[0, 1/C],
+              [-1/L, -R/L]])
+
+B = np.array([[0],
+              [1/L]])
+
+# Входное воздействие (постоянное напряжение)
+def input_voltage(t):
+    return E
+
+# Система дифференциальных уравнений
+def state_equations(t, x):
+    # x[0] - напряжение на конденсаторе uC
+    # x[1] - ток через индуктивность iL
+    dxdt = A @ x + B.flatten() * input_voltage(t)
+    return dxdt
+
+# Временной интервал
+t_span = (0, 0.01)  # 10 мс
+t_eval = np.linspace(t_span[0], t_span[1], 1000)
+
+# Решение системы
+sol = solve_ivp(state_equations, t_span, [uC0, iL0], 
+                t_eval=t_eval, method='RK45')
+
+# Визуализация результатов
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+
+# Напряжение на конденсаторе
+ax1.plot(sol.t * 1000, sol.y[0], 'b-', linewidth=2)
+ax1.set_xlabel('Время, мс')
+ax1.set_ylabel('Напряжение на C, В')
+ax1.set_title('Переходный процесс в RLC-цепи')
+ax1.grid(True, alpha=0.3)
+ax1.legend(['u_C(t)'])
+
+# Ток через индуктивность
+ax2.plot(sol.t * 1000, sol.y[1], 'r-', linewidth=2)
+ax2.set_xlabel('Время, мс')
+ax2.set_ylabel('Ток через L, А')
+ax2.grid(True, alpha=0.3)
+ax2.legend(['i_L(t)'])
+
+plt.tight_layout()
+plt.show()
