@@ -1,0 +1,42 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# Дифференциальное уравнение
+def f(args):
+    t, x1, y1, v1x, v1y, x2, y2, v2x, v2y = args
+    r = ((x1 - x2)**2 + (y1 - y2)**2)**0.5
+    f1x = -(x1 - x2) / r**3  
+    f1y = -(y1 - y2) / r**3
+    f2x = -f1x
+    f2y = -f1y
+    return np.array([1., v1x, v1y, f1x, f1y, v2x, v2y, f2x, f2y])
+
+
+# Метод Рунге-Кутта 4-го порядка
+def step(f, x, h):
+    k1 = f(x)
+    k2 = f(x + h/2 * k1)
+    k3 = f(x + h/2 * k2)
+    k4 = f(x + h * k3)
+    xn = x + h/6 * (k1 + 2*k2 + 2*k3 + k4)
+    return xn
+
+
+# Начальные условия: [t, x1, y1, v1x, v1y, x2, y2, v2x, v2y]
+x = np.array([0., 1., 0., 0., 1., -1., 0., 0., -1.])
+h = 0.01  
+
+plt.ion()
+plt.xlabel('X')
+plt.ylabel('Y')
+plt.title('Движение двух тел')
+plt.grid(True)
+
+for nt in range(1000):
+    x = step(f, x, h)
+    plt.plot(x[1], x[2], 'go', markersize=3)
+    plt.plot(x[5], x[6], 'bo', markersize=3)
+    
+plt.ioff()
+plt.show()
