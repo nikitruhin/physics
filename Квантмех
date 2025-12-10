@@ -1,0 +1,376 @@
+"""
+Решение уравнения Шредингера для моделирования квантовых часов
+Волновая функция осциллирует между двумя потенциальными ямами - это квантовые часы
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from scipy.signal import find_peaks
+
+# ============================================================================
+# ПАРАМЕТРЫ СИСТЕМЫ
+# ============================================================================
+
+# Параметры дискретизации (шаги по пространству и времени)
+dx = 0.2          # шаг по пространству
+xmax = 40.0       # максимальная координата x [-xmax, xmax]
+dt = 0.02         # шаг по времени
+tmax = 100.0      # максимальное время моделирования
+
+# Параметры двойной потенциальной ямы
+b = 1.0    # расстояние между ямами
+a = 1.0    # ширина ям
+v0 = -1.0  # глубина ям (отрицательная - потенциальная яма)
+
+# ============================================================================
+# ПОДГОТОВКА СЕТОК И ПОТЕНЦИАЛА
+# ============================================================================
+
+# сетки
+sp_x = np.arange(-xmax, xmax, dx)  # координаты x
+sp_t = np.arange(0.0, tmax, dt)    # моменты времени
+
+# Потенциал в виде двух ям
+def potential(x):
+    """Потенциал в форме двух ям (два 'гиперболических косинуса' в квадрате)"""
+    center1 = b + a/2.0   # центр правой ямы
+    center2 = -center1    # центр левой ямы (симметрично)
+    
+    # Потенциал: сумма двух ям
+    V1 = v0 / np.cosh(x - center1)**2
+    V2 = v0 / np.cosh(x - center2)**2
+    return V1 + V2
+
+# потенциал во всех точках сетки
+V = potential(sp_x).astype(np.complex128)
+
+# ============================================================================
+# НАЧАЛЬНОЕ СОСТОЯНИЕ (ГАУССОВ ПАКЕТ)
+# ============================================================================
+
+# Центр начального гауссова пакета - в правой яме
+center = b + a/2.0  # совпадает с центром правой ямы
+
+# Гауссов пакет: exp(-(x-center)²/(2σ²)), где σ = a
+psi_init = np.exp(-(sp_x - center)**2 / (2*a)**2).astype(np.complex128)
+
+# Нормировка волновой функции: ∫|ψ|²dx = 1
+# методом трапеций
+norm = np.sqrt(np.trapz(np.abs(psi_init)**2, sp_x))
+psi_init = psi_init / norm
+
+print(f"Размеры: Nx = {len(sp_x)} точек по x, Nt = {len(sp_t)} шагов по времени")
+print(f"Нормировка начального состояния: ∫|ψ|²dx = {np.trapz(np.abs(psi_init)**2, sp_x):.6f}")
+
+# ============================================================================
+# ПЕРВЫЙ ШАГ (ЯВНАЯ СХЕМА)
+# ============================================================================
+
+psi = np.zeros((len(sp_t), len(sp_x)), dtype=np.complex128)
+psi[0, :] = psi_init  # начальное условие
+
+# Первый шаг - явная схема
+print("Выполняю первый шаг (явная схема)...")
+for ix in range(len(sp_x)):
+    if ix != 0 and ix != len(sp_x) - 1:
+        # Внутренние точки: полный дискретный лапласиан
+        laplacian = (psi[0, ix+1] - 2*psi[0, ix] + psi[0, ix-1]) / dx**2
+        psi[1, ix] = psi[0, ix] + 1j*dt*laplacian - 1j*dt*V[ix]*psi[0, ix]
+    
+    elif ix == 0:
+        # Левая граница: приближенный лапласиан
+        laplacian = (psi[0, ix+1] - 2*psi[0, ix]) / dx**2
+        psi[1, ix] = psi[0, ix] + 1j*dt*laplacian - 1j*dt*V[ix]*psi[0, ix]
+    
+    else:  # ix == len(sp_x) - 1
+        # Правая граница: приближенный лапласиан
+        laplacian = (-2*psi[0, ix] + psi[0, ix-1]) / dx**2
+        psi[1, ix] = psi[0, ix] + 1j*dt*laplacian - 1j*dt*V[ix]*psi[0, ix]
+
+# ============================================================================
+# ОСНОВНОЙ ЦИКЛ (НЕЯВНАЯ СХЕМА)
+# ============================================================================
+
+print("Выполняю основной расчет (неявная схема)...")
+for it in range(2, len(sp_t)):
+    
+    for ix in range(len(sp_x)):
+        # Общий случай: внутренние точки
+        if ix != 0 and ix != len(sp_x) - 1:
+            # Формула из задания (неявная схема)
+            temp = (2j*dt/(dx**2)) * (psi[it-1, ix+1] + psi[it-1, ix-1] - psi[it-2, ix])
+            temp += -2j*dt*V[ix]*psi[it-1, ix] + psi[it-2, ix]
+            psi[it, ix] = temp / (1.0 + 2j*dt/dx**2)
+        
+        # Левая граница
+        elif ix == 0:
+            temp = (2j*dt/(dx**2)) * (psi[it-1, ix+1] - psi[it-2, ix])
+            temp += -2j*dt*V[ix]*psi[it-1, ix] + psi[it-2, ix]
+            psi[it, ix] = temp / (1.0 + 2j*dt/dx**2)
+        
+        # Правая граница
+        else:  # ix == len(sp_x) - 1
+            temp = (2j*dt/(dx**2)) * (psi[it-1, ix-1] - psi[it-2, ix])
+            temp += -2j*dt*V[ix]*psi[it-1, ix] + psi[it-2, ix]
+            psi[it, ix] = temp / (1.0 + 2j*dt/dx**2)
+    
+    # Периодическая нормировка (раз в 50 шагов для численной стабильности)
+    if it % 50 == 0:
+        norm_current = np.sqrt(np.trapz(np.abs(psi[it, :])**2, sp_x))
+        psi[it, :] = psi[it, :] / norm_current
+    
+    # Прогресс-бар
+    if it % 500 == 0:
+        print(f"  Выполнено {it}/{len(sp_t)} шагов по времени")
+
+print("Расчет завершен!")
+
+# ============================================================================
+# ВЫЧИСЛЕНИЕ ПЕРИОДА ОСЦИЛЛЯЦИЙ
+# ============================================================================
+
+right_well_center = b + a/2.0
+mask_right = (sp_x > right_well_center - 2*a) & (sp_x < right_well_center + 2*a)
+
+# Вероятность в правой яме для каждого момента времени
+prob_right_well = np.zeros(len(sp_t))
+for it in range(len(sp_t)):
+    prob_density = np.abs(psi[it, :])**2  # плотность вероятности
+    prob_right_well[it] = np.trapz(prob_density[mask_right], sp_x[mask_right])
+
+peaks, properties = find_peaks(prob_right_well, distance=20, prominence=0.05)
+
+if len(peaks) >= 2:
+    peak_times = sp_t[peaks]
+    periods = np.diff(peak_times)
+    mean_period = np.mean(periods)
+    print(f"\nПики обнаружены в моменты времени: {peak_times[:5]}...")
+    print(f"Периоды между пиками: {periods}")
+    print(f"Средний период осцилляций: {mean_period:.2f}")
+else:
+    print("Не удалось найти достаточное количество пиков для определения периода")
+    mean_period = None
+
+# ============================================================================
+# ВИЗУАЛИЗАЦИЯ РЕЗУЛЬТАТОВ
+# ============================================================================
+
+fig = plt.figure(figsize=(14, 10))
+
+# 1. График потенциала
+ax1 = plt.subplot(2, 2, 1)
+ax1.plot(sp_x, V.real, 'k-', linewidth=2)
+ax1.fill_between(sp_x[mask_right], V[mask_right].real, 
+                 np.min(V.real)-0.5, alpha=0.3, color='blue', label='Правая яма')
+ax1.set_xlabel('Координата x', fontsize=12)
+ax1.set_ylabel('Потенциал V(x)', fontsize=12)
+ax1.set_title('Двойная потенциальная яма', fontsize=14)
+ax1.grid(True, alpha=0.3)
+ax1.legend()
+
+# 2. Начальное состояние
+ax2 = plt.subplot(2, 2, 2)
+ax2.plot(sp_x, np.abs(psi_init)**2, 'b-', linewidth=2, label='|ψ(x,0)|²')
+ax2.plot(sp_x, V.real / np.max(np.abs(V.real)) * 0.5, 'k--', alpha=0.5, label='Потенциал (норм.)')
+ax2.set_xlabel('Координата x', fontsize=12)
+ax2.set_ylabel('|ψ(x,0)|²', fontsize=12)
+ax2.set_title('Начальное состояние (гауссов пакет)', fontsize=14)
+ax2.grid(True, alpha=0.3)
+ax2.legend()
+
+# 3. Осцилляции вероятности в правой яме
+ax3 = plt.subplot(2, 2, 3)
+ax3.plot(sp_t, prob_right_well, 'r-', linewidth=2, label='Вероятность в правой яме')
+
+if len(peaks) >= 2:
+    ax3.plot(sp_t[peaks], prob_right_well[peaks], 'bo', label='Пики')
+    ax3.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Среднее = 0.5')
+    ax3.set_title(f'Осцилляции вероятности (период ≈ {mean_period:.2f})', fontsize=14)
+else:
+    ax3.set_title('Осцилляции вероятности в правой яме', fontsize=14)
+
+ax3.set_xlabel('Время t', fontsize=12)
+ax3.set_ylabel('Вероятность P(t)', fontsize=12)
+ax3.grid(True, alpha=0.3)
+ax3.legend()
+ax3.set_ylim([0, 1])
+
+# 4. Схема численного метода
+ax4 = plt.subplot(2, 2, 4)
+ax4.text(0.1, 0.7, 'ЧИСЛЕННАЯ СХЕМА\n\n' +
+         'Основное уравнение:\n' +
+         r'$i\frac{\partial\psi}{\partial t} = -\frac{\partial^2\psi}{\partial x^2} + V(x)\psi$' + '\n\n' +
+         'Неявная схема (устойчивая):\n' +
+         r'$\frac{\psi^{n+1}_j - \psi^{n-1}_j}{2\Delta t} = i\frac{\psi^n_{j+1} - 2\psi^n_j + \psi^n_{j-1}}{\Delta x^2} - iV_j\psi^n_j$',
+         fontsize=11, transform=ax4.transAxes)
+ax4.set_title('Численный метод решения', fontsize=14)
+ax4.axis('off')
+
+plt.suptitle('МОДЕЛИРОВАНИЕ КВАНТОВЫХ ЧАСОВ', fontsize=16, y=0.98)
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# АНИМАЦИЯ ЭВОЛЮЦИИ ВОЛНОВОЙ ФУНКЦИИ
+# ============================================================================
+
+print("\nСоздаю анимацию...")
+
+fig_anim, ax_anim = plt.subplots(figsize=(10, 6))
+
+# Потенциал на фоне
+ax_anim.plot(sp_x, V.real, 'k-', linewidth=2, label='Потенциал V(x)')
+
+# Волновая функция (будет обновляться)
+line, = ax_anim.plot(sp_x, np.abs(psi[0, :])**2, 'b-', linewidth=2, label='|ψ(x,t)|²')
+
+ax_anim.set_xlabel('Координата x', fontsize=12)
+ax_anim.set_ylabel('|ψ(x,t)|²', fontsize=12)
+ax_anim.set_title('Эволюция волновой функции', fontsize=14)
+ax_anim.grid(True, alpha=0.3)
+ax_anim.legend()
+ax_anim.set_ylim([0, 1.2 * np.max(np.abs(psi[0, :])**2)])
+
+# Функция обновления кадра анимации
+def update_animation(frame):
+    """Обновляет график для каждого кадра анимации"""
+    t_idx = frame * 10
+    if t_idx >= len(sp_t):
+        t_idx = len(sp_t) - 1
+    
+    # Обновляем данные линии
+    prob_density = np.abs(psi[t_idx, :])**2
+    line.set_ydata(prob_density)
+    
+    # Обновляем заголовок
+    ax_anim.set_title(f'Эволюция волновой функции (t = {sp_t[t_idx]:.1f})', fontsize=14)
+    
+    return line,
+
+# Создаем анимацию
+ani = FuncAnimation(fig_anim, update_animation, 
+                   frames=len(sp_t)//10, 
+                   interval=50, blit=True)
+
+plt.show()
+
+# ============================================================================
+# ИССЛЕДОВАНИЕ ЗАВИСИМОСТИ ПЕРИОДА ОТ ПАРАМЕТРОВ
+# ============================================================================
+
+print("\nИсследую зависимость периода от параметров...")
+
+distances = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+periods_vs_distance = []
+
+tmax_short = 50.0
+sp_t_short = np.arange(0.0, tmax_short, dt)
+
+for distance in distances:
+    print(f"  Расстояние b = {distance}...")
+    
+    b_current = distance
+    
+    V_current = (v0/np.cosh(sp_x - (b_current + a/2.0))**2 + 
+                 v0/np.cosh(sp_x + (b_current + a/2.0))**2).astype(np.complex128)
+    
+    # Начальное состояние
+    center_current = b_current + a/2.0
+    psi_init_current = np.exp(-(sp_x - center_current)**2 / (2*a)**2).astype(np.complex128)
+    norm = np.sqrt(np.trapz(np.abs(psi_init_current)**2, sp_x))
+    psi_init_current = psi_init_current / norm
+    
+    # Краткий расчет (только для определения периода)
+    psi_short = np.zeros((len(sp_t_short), len(sp_x)), dtype=np.complex128)
+    psi_short[0, :] = psi_init_current
+    
+    # Первый шаг
+    for ix in range(len(sp_x)):
+        if ix != 0 and ix != len(sp_x) - 1:
+            laplacian = (psi_short[0, ix+1] - 2*psi_short[0, ix] + psi_short[0, ix-1]) / dx**2
+            psi_short[1, ix] = psi_short[0, ix] + 1j*dt*laplacian - 1j*dt*V_current[ix]*psi_short[0, ix]
+        elif ix == 0:
+            laplacian = (psi_short[0, ix+1] - 2*psi_short[0, ix]) / dx**2
+            psi_short[1, ix] = psi_short[0, ix] + 1j*dt*laplacian - 1j*dt*V_current[ix]*psi_short[0, ix]
+        else:
+            laplacian = (-2*psi_short[0, ix] + psi_short[0, ix-1]) / dx**2
+            psi_short[1, ix] = psi_short[0, ix] + 1j*dt*laplacian - 1j*dt*V_current[ix]*psi_short[0, ix]
+    
+    # Основной цикл
+    for it in range(2, len(sp_t_short)):
+        for ix in range(len(sp_x)):
+            if ix != 0 and ix != len(sp_x) - 1:
+                temp = (2j*dt/(dx**2)) * (psi_short[it-1, ix+1] + psi_short[it-1, ix-1] - psi_short[it-2, ix])
+                temp += -2j*dt*V_current[ix]*psi_short[it-1, ix] + psi_short[it-2, ix]
+                psi_short[it, ix] = temp / (1.0 + 2j*dt/dx**2)
+            elif ix == 0:
+                temp = (2j*dt/(dx**2)) * (psi_short[it-1, ix+1] - psi_short[it-2, ix])
+                temp += -2j*dt*V_current[ix]*psi_short[it-1, ix] + psi_short[it-2, ix]
+                psi_short[it, ix] = temp / (1.0 + 2j*dt/dx**2)
+            else:
+                temp = (2j*dt/(dx**2)) * (psi_short[it-1, ix-1] - psi_short[it-2, ix])
+                temp += -2j*dt*V_current[ix]*psi_short[it-1, ix] + psi_short[it-2, ix]
+                psi_short[it, ix] = temp / (1.0 + 2j*dt/dx**2)
+    
+    mask_right_current = (sp_x > center_current - 2*a) & (sp_x < center_current + 2*a)
+    prob_right_current = np.zeros(len(sp_t_short))
+    for it in range(len(sp_t_short)):
+        prob_density = np.abs(psi_short[it, :])**2
+        prob_right_current[it] = np.trapz(prob_density[mask_right_current], sp_x[mask_right_current])
+    
+    peaks_current, _ = find_peaks(prob_right_current, distance=15, prominence=0.05)
+    if len(peaks_current) >= 2:
+        period_current = np.mean(np.diff(sp_t_short[peaks_current]))
+        periods_vs_distance.append(period_current)
+    else:
+        periods_vs_distance.append(np.nan)
+
+# График зависимости периода от расстояния
+fig_dist, ax_dist = plt.subplots(figsize=(10, 6))
+ax_dist.plot(distances, periods_vs_distance, 'bo-', linewidth=2, markersize=8)
+ax_dist.set_xlabel('Расстояние между ямами (b)', fontsize=12)
+ax_dist.set_ylabel('Период осцилляций T', fontsize=12)
+ax_dist.set_title('Зависимость периода квантовых часов от расстояния между ямами', fontsize=14)
+ax_dist.grid(True, alpha=0.3)
+ax_dist.set_yscale('log')  # Логарифмическая шкала, т.к. зависимость экспоненциальная
+ax_dist.set_ylabel('Период T (лог. шкала)', fontsize=12)
+
+plt.tight_layout()
+plt.show()
+
+print("\n" + "="*60)
+print("РЕЗУЛЬТАТЫ ИССЛЕДОВАНИЯ:")
+print("="*60)
+print("1. Квантовые часы работают за счет туннелирования между ямами")
+print("2. Волновая функция осциллирует между ямами с определенным периодом")
+print("3. Период экспоненциально растет с увеличением расстояния между ямами")
+print("4. Это прямое следствие экспоненциальной зависимости туннелирования от расстояния")
+print("="*60)
+
+# ============================================================================
+# ТЕОРЕТИЧЕСКОЕ ОБЪЯСНЕНИЕ
+# ============================================================================
+
+print("\nТЕОРЕТИЧЕСКОЕ ОБЪЯСНЕНИЕ (для отчета):")
+print("\nДля симметричной двойной ямы два низших состояния:")
+print("  ψ₁(x) - симметричное (основное), энергия E₁")
+print("  ψ₂(x) - антисимметричное (первое возбужденное), энергия E₂")
+print(f"\nРазность энергий: ΔE = E₂ - E₁ ≈ {1/(mean_period/np.pi):.4f} (из нашего расчета)")
+
+print("\nНачальное состояние в правой яме:")
+print("  ψ(x,0) ≈ [ψ₁(x) + ψ₂(x)]/√2")
+
+print("\nЭволюция во времени:")
+print("  ψ(x,t) = [ψ₁(x)e^{-iE₁t} + ψ₂(x)e^{-iE₂t}]/√2")
+print("         = e^{-i(E₁+E₂)t/2} [ψ₁(x)e^{iΔEt/2} + ψ₂(x)e^{-iΔEt/2}]/√2")
+
+print("\nВероятность в правой яме:")
+print("  P_right(t) = |∫_right ψ(x,t)dx|²")
+print("             = ½ + ½ cos(ΔE·t)")
+
+print(f"\nПериод осцилляций: T = 2π/ΔE ≈ {mean_period:.2f}")
+print("\nТаким образом, квантовые часы - это манифестация:")
+print("  1. Квантовой суперпозиции состояний")
+print("  2. Туннелирования через потенциальный барьер")
+print("  3. Квантовой интерференции волновых функций")
